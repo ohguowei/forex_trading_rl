@@ -1,5 +1,5 @@
 # main.py
-
+import datetime, time, threading
 import torch
 torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
@@ -16,6 +16,17 @@ from worker import worker
 from live_env import LiveOandaForexEnv
 from simulated_env import SimulatedOandaForexEnv
 
+
+def wait_for_trading_window():
+    # Loop until local time is Mon ≥6 AM and Sat <6 AM
+    while True:
+        now = datetime.datetime.now()
+        wd, hr = now.weekday(), now.hour
+        # Sunday=6 -> skip; Mon(0)<6 -> skip; Sat(5)≥6 -> skip
+        if not (wd == 6 or (wd == 0 and hr < 6) or (wd == 5 and hr >= 6)):
+            return
+        print("Outside Mon 6AM – Sat 6AM window. Sleeping 60s...")
+        time.sleep(60)
 
 ##############################################
 # Model Aggregation Function
@@ -92,6 +103,7 @@ def main():
         units=100, 
         candle_count=5000
     )
+    wait_for_trading_window()  # Wait here until we’re within Mon 6 AM – Sat 6 AM
 
     # Start multiple training workers (using simulated environment)
     workers = []
