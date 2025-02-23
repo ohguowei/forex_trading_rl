@@ -18,7 +18,7 @@ class Trade:
         return f"Trade(side={self.side}, entry={self.entry_price}, exit={self.exit_price}, profit={self.profit:.4f})"
 
 class SimulatedOandaForexEnv:
-    def __init__(self, instrument="EUR_USD", units=100, granularity="H1", candle_count=500, spread=0.0002):
+    def __init__(self, instrument="EUR_USD", units=100, granularity="H1", candle_count=5000, spread=0.0002):
         self.instrument = instrument
         self.units = units
         self.granularity = granularity

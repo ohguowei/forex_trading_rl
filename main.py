@@ -75,7 +75,7 @@ def trade_live(global_model, live_env, num_steps=10):
 ##############################################
 def main():
     # Hyperparameters
-    num_workers = 4  # Number of training workers
+    num_workers = 5  # Number of training workers
     train_steps = 100  # Steps per worker per episode
     trade_steps = 10  # Trading steps (candles) to process
     aggregation_interval = 60  # Aggregate models every 60 seconds
