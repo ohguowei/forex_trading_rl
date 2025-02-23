@@ -1,12 +1,12 @@
 # main.py
-import datetime, time, threading
+import datetime
 import torch
 torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
 
-import torch.nn as nn
+#import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
+#import torch.nn.functional as F
 import numpy as np
 import threading
 import time
@@ -14,8 +14,6 @@ import time
 from models import ActorCritic
 from worker import worker
 from live_env import LiveOandaForexEnv
-from simulated_env import SimulatedOandaForexEnv
-
 
 def wait_for_trading_window():
     # Loop until local time is Mon ≥6 AM and Sat <6 AM
@@ -27,6 +25,33 @@ def wait_for_trading_window():
             return
         print("Outside Mon 6AM – Sat 6AM window. Sleeping 60s...")
         time.sleep(60)
+
+def calculate_next_trigger_time():
+    """
+    Calculate the next trigger time at the next hour and 1 minute mark.
+    For example:
+    - If the current time is 11:01 AM, the next trigger time is 12:01 PM.
+    - If the current time is 9:13 AM, the next trigger time is 10:01 AM.
+    """
+    now = datetime.datetime.now()
+    next_hour = now.replace(minute=1, second=0, microsecond=0) + datetime.timedelta(hours=1)
+    return next_hour
+
+def wait_until_next_trigger():
+    """
+    Wait until the next trigger time (next hour and 1 minute mark).
+    """
+
+    next_trigger_time = calculate_next_trigger_time()
+    now = datetime.datetime.now()
+    time_to_wait = (next_trigger_time - now).total_seconds()
+    
+    if time_to_wait > 0:
+        print(f"Waiting {time_to_wait:.0f} seconds until the next trigger at {next_trigger_time.strftime('%H:%M:%S')}...")
+        time.sleep(time_to_wait)
+    else:
+        print("Next trigger time is in the past. Triggering immediately.")
+
 
 ##############################################
 # Model Aggregation Function
@@ -86,9 +111,9 @@ def trade_live(global_model, live_env, num_steps=10):
 ##############################################
 def main():
     # Hyperparameters
-    num_workers = 5  # Number of training workers
+    num_workers = 10 # Number of training workers
     train_steps = 100  # Steps per worker per episode
-    trade_steps = 10  # Trading steps (candles) to process
+    trade_steps = 1  # Trading steps (candles) to process
     aggregation_interval = 60  # Aggregate models every 60 seconds
 
     # Create the global model and optimizer
@@ -100,9 +125,10 @@ def main():
     # Create a live environment (or pass the real API credentials)
     live_env = LiveOandaForexEnv(
         instrument="EUR_USD", 
-        units=100, 
+        units=1000, 
         candle_count=5000
     )
+    # Wait here until we’re within Mon 6 AM – Sat 6 AM
     wait_for_trading_window()  # Wait here until we’re within Mon 6 AM – Sat 6 AM
 
     # Start multiple training workers (using simulated environment)
@@ -119,7 +145,7 @@ def main():
     # Periodically aggregate models and do a trading step
     while True:
         #time.sleep(aggregation_interval)  # Let the workers run for a bit
-
+        wait_until_next_trigger()
         # Collect local copies from the global model
         local_models = []
         for i in range(num_workers):
@@ -131,11 +157,12 @@ def main():
         aggregated_model = aggregate_models(local_models)
 
         # Optionally run a live trading cycle with the aggregated model
+        #wait_until_next_trigger()
         trade_live(aggregated_model, live_env, num_steps=trade_steps)
 
         print("[Main] Trading cycle completed. You can continue or break the loop.")
         # For demonstration, let’s break after one iteration:
-        break
+        #break
 
     print("[Main] Done!")
 

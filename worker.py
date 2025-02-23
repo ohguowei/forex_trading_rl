@@ -74,32 +74,47 @@ def worker(
             
             # Policy loss: -log(prob_of_action) * advantage
             # We'll index probs with [0, action_idx], ignoring the batch dimension.
-            policy_loss = -torch.log(probs[0, action]) * advantage.detach()
+            policy_loss = -torch.log(probs[0, action_idx]) * advantage.detach()
             
             # Value loss: MSE of advantage
             value_loss = advantage.pow(2)
             
+            # Total loss
             loss = policy_loss + value_loss
+            
+            # Check if the loss is valid (not NaN or Inf)
+            if torch.isnan(loss).any() or torch.isinf(loss).any():
+                print(f"[Worker {worker_id}] Invalid loss at step {step_count}: {loss.item()}")
+                step_count += 1
+                continue  # Skip this step if the loss is invalid
             
             # Backprop on local model
             optimizer.zero_grad()
             loss.backward()
             
-            # Copy local gradients to global model's parameters
-            for global_param, local_param in zip(global_model.parameters(),
-                                                 local_model.parameters()):
+            # Debugging: Check if gradients are valid
+            for name, param in local_model.named_parameters():
+                if param.grad is None:
+                    print(f"[Worker {worker_id}] Gradient is None for parameter {name} at step {step_count}")
+                    # If gradient is None, skip updating this parameter
+                    continue
+                
+            # Copy local gradients
+            for global_param, local_param in zip(global_model.parameters(), local_model.parameters()):
                 if local_param.grad is not None:
-                    # Copy the gradient data
                     global_param.grad = local_param.grad.clone()
                 else:
-                    # Optional: debug print
                     print(f"[Worker {worker_id}] param has no grad.")
-                    pass
+                    pass  # This line is just a placeholder; it does nothing
             
             # Update global model (protected by lock)
             with optimizer_lock:
+                # Filter out parameters that have grad=None
+                for group in optimizer.param_groups:
+                    group["params"] = [p for p in group["params"] if p.grad is not None]
                 optimizer.step()
-            
+
+
             # Sync local model with global model after update
             local_model.load_state_dict(global_model.state_dict())
             
@@ -124,7 +139,7 @@ def worker(
         
         except Exception as e:
             # This catch ensures if something goes wrong, we log the traceback
-            print(f"[Worker {worker_id}] Exception during step: {step_count}",e)
+            print(f"[Worker {worker_id}] Exception during step: {step_count}", e)
             traceback.print_exc()
             break
     
