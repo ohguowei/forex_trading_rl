@@ -1,7 +1,15 @@
 import time
 import numpy as np
-from oanda_api import fetch_candle_data, open_position, close_position, ACCOUNT_ID, ACCESS_TOKEN
 from feature_extractor import compute_features
+
+from oanda_api import (
+    fetch_candle_data,
+    open_position,
+    close_position,
+    get_open_positions,
+    ACCOUNT_ID, 
+    ACCESS_TOKEN
+)
 
 class Trade:
     """
@@ -28,13 +36,49 @@ class LiveOandaForexEnv:
         # Fetch initial historical data
         self.data = self._fetch_initial_data()
         self.features = compute_features(self.data)
-        self.current_index = 16  # Start after the first 16 candles for the sliding window
+        self.current_index = 16
 
-        # Trade state variables
+        # Initialize local state about open position
         self.position_open = False
-        self.position_side = None
+        self.position_side = None  # "long" or "short"
         self.entry_price = None
-        self.trade_log = []  # List of Trade objects
+        self.trade_log = []
+
+        # Now, check if there's already an open position in OANDA
+        self._sync_oanda_position_state()
+
+    def _sync_oanda_position_state(self):
+        """
+        Check OANDA for any open positions in our 'instrument'.
+        If found, set self.position_open, self.position_side, and self.entry_price.
+        """
+        positions_response = get_open_positions(ACCOUNT_ID)
+        if not positions_response or "positions" not in positions_response:
+            print("No positions found or error in position check.")
+            return
+
+        # positions_response["positions"] is typically a list of dicts
+        for pos in positions_response["positions"]:
+            if pos["instrument"] == self.instrument:
+                # OANDA splits positions into 'long' and 'short' subfields
+                long_units = float(pos["long"]["units"])
+                short_units = float(pos["short"]["units"])
+
+                if long_units > 0:
+                    self.position_open = True
+                    self.position_side = "long"
+                    self.entry_price = float(pos["long"]["averagePrice"])
+                    print(f"Detected existing LONG position at price {self.entry_price}.")
+                    return
+                elif short_units > 0:
+                    self.position_open = True
+                    self.position_side = "short"
+                    self.entry_price = float(pos["short"]["averagePrice"])
+                    print(f"Detected existing SHORT position at price {self.entry_price}.")
+                    return
+
+        # If no position in that instrument is found
+        print(f"No existing position found for {self.instrument} in OANDA.")
 
     def _fetch_initial_data(self):
         """

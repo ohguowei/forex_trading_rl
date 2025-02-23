@@ -1,9 +1,12 @@
 # oanda_api.py
-
 import oandapyV20
+from oandapyV20.endpoints.positions import PositionClose, OpenPositions
+import time
+
 from oandapyV20 import API
 import oandapyV20.endpoints.instruments as instruments
 import oandapyV20.endpoints.orders as orders
+from live_env import Trade
 
 # Set up your credentials and environment.
 ACCOUNT_ID = "101-001-26348919-001"
@@ -81,9 +84,71 @@ def open_position(account_id, instrument, units, side):
 
 def close_position(account_id, instrument):
     """
-    Close the current position.
-    (In production, replace this with an appropriate API call.)
+    Actually close any open position for 'instrument'.
+    This sends a PositionClose request to OANDA
+    to close all units (long or short).
     """
-    print(f"Closing current position on {instrument}.")
-    # For demonstration, this function only prints a message.
-    return None
+    try:
+        data = {
+            "longUnits": "ALL",
+            "shortUnits": "ALL"
+        }
+        r = PositionClose(accountID=account_id, instrument=instrument, data=data)
+        response = client.request(r)
+        print(f"Position closed for {instrument}: {response}")
+        return response
+    except Exception as e:
+        print(f"Error closing position: {e}")
+        return None
+
+def get_open_positions(account_id):
+    """
+    Retrieve a list of all open positions for the specified account.
+    Returns the raw JSON response, or None if there's an error.
+    """
+    try:
+        r = OpenPositions(accountID=account_id)
+        response = client.request(r)
+        return response  # a dict with "positions" key
+    except Exception as e:
+        print(f"Error retrieving open positions: {e}")
+        return None
+
+def live_close_position(self):
+    """
+    Close the current live position with error handling.
+    """
+    if not self.position_open:
+        print("Live: No open position to close.")
+        return
+
+    try:
+        response = close_position(account_id=ACCOUNT_ID, instrument=self.instrument)
+        if response is not None:
+            exit_price = self.data[self.current_index][3]
+            profit = 0.0
+            if self.position_side == "long":
+                profit = (exit_price - self.entry_price) / self.entry_price
+            elif self.position_side == "short":
+                profit = (self.entry_price - exit_price) / self.entry_price
+
+            # Log the trade
+            trade = Trade(
+                side=self.position_side,
+                entry_price=self.entry_price,
+                exit_price=exit_price,
+                profit=profit,
+                timestamp=time.time()
+            )
+            self.trade_log.append(trade)
+            print(f"Live: Closed {self.position_side} position on {self.instrument} at {exit_price}, Profit: {profit:.4f}")
+
+            # Reset local position state
+            self.position_open = False
+            self.position_side = None
+            self.entry_price = None
+        else:
+            print("Live: Close request failed or returned None from OANDA.")
+    except Exception as e:
+        print(f"Error closing position: {e}")
+    
