@@ -1,6 +1,9 @@
 # main.py
 
 import torch
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
+
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
@@ -12,6 +15,7 @@ from models import ActorCritic
 from worker import worker
 from live_env import LiveOandaForexEnv
 from simulated_env import SimulatedOandaForexEnv
+
 
 ##############################################
 # Model Aggregation Function
@@ -72,7 +76,7 @@ def trade_live(global_model, live_env, num_steps=10):
 def main():
     # Hyperparameters
     num_workers = 4  # Number of training workers
-    train_steps = 20  # Steps per worker per episode
+    train_steps = 100  # Steps per worker per episode
     trade_steps = 10  # Trading steps (candles) to process
     aggregation_interval = 60  # Aggregate models every 60 seconds
 
@@ -86,7 +90,7 @@ def main():
     live_env = LiveOandaForexEnv(
         instrument="EUR_USD", 
         units=100, 
-        candle_count=500
+        candle_count=5000
     )
 
     # Start multiple training workers (using simulated environment)
