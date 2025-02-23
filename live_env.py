@@ -22,9 +22,12 @@ class Trade:
         self.profit = profit
         self.timestamp = timestamp
 
-
     def __repr__(self):
-        return f"Trade(side={self.side}, entry={self.entry_price}, exit={self.exit_price}, profit={self.profit:.4f})"
+        return (
+            f"Trade(side={self.side}, entry={self.entry_price}, "
+            f"exit={self.exit_price}, profit={self.profit:.4f}, "
+            f"timestamp={self.timestamp})"
+        )
 
 class LiveOandaForexEnv:
     def __init__(self, instrument="EUR_USD", units=100, granularity="H1", candle_count=5000):
@@ -33,19 +36,22 @@ class LiveOandaForexEnv:
         self.granularity = granularity
         self.candle_count = candle_count
 
-        # Fetch initial historical data
+        # Example data fetching
         self.data = self._fetch_initial_data()
+        # This is up to you to define
         self.features = compute_features(self.data)
         self.current_index = 16
 
-        # Initialize local state about open position
+        # Trade state variables
         self.position_open = False
-        self.position_side = None  # "long" or "short"
+        self.position_side = None
         self.entry_price = None
         self.trade_log = []
 
-        # Now, check if there's already an open position in OANDA
-        self._sync_oanda_position_state()
+        # Possibly call _sync_oanda_position_state() here if you want
+        # self._sync_oanda_position_state()
+
+
 
     def _sync_oanda_position_state(self):
         """
@@ -165,35 +171,40 @@ class LiveOandaForexEnv:
     def live_close_position(self):
         """
         Close the current live position with error handling.
+        Calls close_position(...) from oanda_api.py
+        then logs a Trade object, resets environment state, etc.
         """
         if not self.position_open:
             print("Live: No open position to close.")
             return
 
         try:
-            close_position(instrument=self.instrument, account_id=ACCOUNT_ID)
-            exit_price = self.data[self.current_index][3]
-            profit = 0
-            if self.position_side == "long":
-                profit = (exit_price - self.entry_price) / self.entry_price
-            elif self.position_side == "short":
-                profit = (self.entry_price - exit_price) / self.entry_price
+            response = close_position(account_id=ACCOUNT_ID, instrument=self.instrument)
+            if response is not None:
+                exit_price = self.data[self.current_index][3]  # Adjust indexing to your data shape
+                profit = 0.0
+                if self.position_side == "long":
+                    profit = (exit_price - self.entry_price) / self.entry_price
+                elif self.position_side == "short":
+                    profit = (self.entry_price - exit_price) / self.entry_price
 
-            # Log the trade
-            trade = Trade(
-                side=self.position_side,
-                entry_price=self.entry_price,
-                exit_price=exit_price,
-                profit=profit,
-                timestamp=time.time()
-            )
-            self.trade_log.append(trade)
-            print(f"Live: Closed {self.position_side} position on {self.instrument} at {exit_price}, Profit: {profit:.4f}")
+                # Log the trade
+                trade = Trade(
+                    side=self.position_side,
+                    entry_price=self.entry_price,
+                    exit_price=exit_price,
+                    profit=profit,
+                    timestamp=time.time()
+                )
+                self.trade_log.append(trade)
+                print(f"Live: Closed {self.position_side} position on {self.instrument} at {exit_price}, profit={profit:.4f}")
 
-            # Reset position state
-            self.position_open = False
-            self.position_side = None
-            self.entry_price = None
+                # Reset environment position
+                self.position_open = False
+                self.position_side = None
+                self.entry_price = None
+            else:
+                print("Live: Close request failed or returned None from OANDA.")
         except Exception as e:
             print(f"Error closing position: {e}")
 

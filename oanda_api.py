@@ -1,21 +1,18 @@
 # oanda_api.py
 import oandapyV20
-from oandapyV20.endpoints.positions import PositionClose, OpenPositions
-import time
-
 from oandapyV20 import API
 import oandapyV20.endpoints.instruments as instruments
 import oandapyV20.endpoints.orders as orders
-from live_env import Trade
+import oandapyV20.endpoints.positions as positions
 
 # Set up your credentials and environment.
 ACCOUNT_ID = "101-001-26348919-001"
 ACCESS_TOKEN = "68ff286dfb6bc058031e66ddcdc72d64-138d97e64d2976820a19a4b179cdcf09"
 ENVIRONMENT = "practice"  # Use "live" for real trading
 
-
 # Create a shared API client.
 client = API(access_token=ACCESS_TOKEN, environment=ENVIRONMENT)
+
 
 def fetch_candle_data(instrument, granularity="H1", candle_count=500):
     """
@@ -29,11 +26,11 @@ def fetch_candle_data(instrument, granularity="H1", candle_count=500):
     }
     r = instruments.InstrumentsCandles(instrument, params=params)
     response = client.request(r)
-    
+
     # Check if the response contains the expected data
     if "candles" not in response:
         raise ValueError("Invalid API response: 'candles' field missing.")
-    
+
     candles = response["candles"]
     data = []
     for candle in candles:
@@ -41,23 +38,23 @@ def fetch_candle_data(instrument, granularity="H1", candle_count=500):
         if "mid" not in candle or "volume" not in candle:
             print(f"Skipping invalid candle: {candle}")
             continue
-        
         mid = candle["mid"]
         try:
             o = float(mid["o"])
             h = float(mid["h"])
             l = float(mid["l"])
             c = float(mid["c"])
-            v = int(candle["volume"])  # Fetch volume from the candle data
+            v = int(candle["volume"])
             data.append([o, h, l, c, v])
         except (KeyError, ValueError) as e:
             print(f"Skipping invalid candle due to error: {e}")
             continue
-    
+
     if not data:
         raise ValueError("No valid candles found in the API response.")
-    
+
     return data
+
 
 def open_position(account_id, instrument, units, side):
     """
@@ -82,6 +79,7 @@ def open_position(account_id, instrument, units, side):
         print(f"Order failed: {e}")
         return None
 
+
 def close_position(account_id, instrument):
     """
     Actually close any open position for 'instrument'.
@@ -93,7 +91,7 @@ def close_position(account_id, instrument):
             "longUnits": "ALL",
             "shortUnits": "ALL"
         }
-        r = PositionClose(accountID=account_id, instrument=instrument, data=data)
+        r = positions.PositionClose(accountID=account_id, instrument=instrument, data=data)
         response = client.request(r)
         print(f"Position closed for {instrument}: {response}")
         return response
@@ -101,54 +99,16 @@ def close_position(account_id, instrument):
         print(f"Error closing position: {e}")
         return None
 
+
 def get_open_positions(account_id):
     """
     Retrieve a list of all open positions for the specified account.
     Returns the raw JSON response, or None if there's an error.
     """
     try:
-        r = OpenPositions(accountID=account_id)
+        r = positions.OpenPositions(accountID=account_id)
         response = client.request(r)
         return response  # a dict with "positions" key
     except Exception as e:
         print(f"Error retrieving open positions: {e}")
         return None
-
-def live_close_position(self):
-    """
-    Close the current live position with error handling.
-    """
-    if not self.position_open:
-        print("Live: No open position to close.")
-        return
-
-    try:
-        response = close_position(account_id=ACCOUNT_ID, instrument=self.instrument)
-        if response is not None:
-            exit_price = self.data[self.current_index][3]
-            profit = 0.0
-            if self.position_side == "long":
-                profit = (exit_price - self.entry_price) / self.entry_price
-            elif self.position_side == "short":
-                profit = (self.entry_price - exit_price) / self.entry_price
-
-            # Log the trade
-            trade = Trade(
-                side=self.position_side,
-                entry_price=self.entry_price,
-                exit_price=exit_price,
-                profit=profit,
-                timestamp=time.time()
-            )
-            self.trade_log.append(trade)
-            print(f"Live: Closed {self.position_side} position on {self.instrument} at {exit_price}, Profit: {profit:.4f}")
-
-            # Reset local position state
-            self.position_open = False
-            self.position_side = None
-            self.entry_price = None
-        else:
-            print("Live: Close request failed or returned None from OANDA.")
-    except Exception as e:
-        print(f"Error closing position: {e}")
-    
