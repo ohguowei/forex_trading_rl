@@ -134,8 +134,8 @@ def main():
     # Periodically aggregate models and do a trading step
     while True:
         #time.sleep(aggregation_interval)  # Let the workers run for a bit
-     #   wait_for_trading_window()  # Wait here until we’re within Mon 6 AM – Sat 6 AM
-     #   wait_until_next_trigger()
+        wait_for_trading_window()  # Wait here until we’re within Mon 6 AM – Sat 6 AM
+        wait_until_next_trigger()
         # Start multiple training workers (using simulated environment)
         workers = []
         for i in range(num_workers):
@@ -146,6 +146,7 @@ def main():
             )
             workers.append(worker_thread)
             worker_thread.start()
+        time.sleep(aggregation_interval)  # Let the workers run for a bit
 
         # Collect local copies from the global model
         local_models = []
@@ -153,12 +154,11 @@ def main():
             local_model = ActorCritic()
             local_model.load_state_dict(global_model.state_dict())
             local_models.append(local_model)
-        time.sleep(aggregation_interval)  # Let the workers run for a bit
         # Aggregate the local models
         aggregated_model = aggregate_models(local_models)
 
         # Optionally run a live trading cycle with the aggregated model
-        wait_until_next_trigger()
+        #wait_until_next_trigger()
         trade_live(aggregated_model, live_env, num_steps=trade_steps)
 
         print("[Main] Trading cycle completed. You can continue or break the loop.")
