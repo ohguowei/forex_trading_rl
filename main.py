@@ -34,7 +34,7 @@ def calculate_next_trigger_time():
     - If the current time is 9:13 AM, the next trigger time is 10:01 AM.
     """
     now = datetime.datetime.now()
-    next_hour = now.replace(minute=1, second=0, microsecond=0) + datetime.timedelta(hours=1)
+    next_hour = now.replace(minute=0, second=0, microsecond=0) + datetime.timedelta(hours=1)
     return next_hour
 
 def wait_until_next_trigger():
@@ -134,8 +134,8 @@ def main():
     # Periodically aggregate models and do a trading step
     while True:
         #time.sleep(aggregation_interval)  # Let the workers run for a bit
-     #   wait_for_trading_window()  # Wait here until we’re within Mon 6 AM – Sat 6 AM
-     #   wait_until_next_trigger()
+        wait_for_trading_window()  # Wait here until we’re within Mon 6 AM – Sat 6 AM
+        wait_until_next_trigger()
         # Start multiple training workers (using simulated environment)
         workers = []
         for i in range(num_workers):
