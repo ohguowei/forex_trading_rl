@@ -49,7 +49,7 @@ class LiveOandaForexEnv:
         self.trade_log = []
 
         # Possibly call _sync_oanda_position_state() here if you want
-        # self._sync_oanda_position_state()
+        self._sync_oanda_position_state()
 
 
 
@@ -76,7 +76,7 @@ class LiveOandaForexEnv:
                     self.entry_price = float(pos["long"]["averagePrice"])
                     print(f"Detected existing LONG position at price {self.entry_price}.")
                     return
-                elif short_units > 0:
+                elif short_units < 0:
                     self.position_open = True
                     self.position_side = "short"
                     self.entry_price = float(pos["short"]["averagePrice"])
@@ -85,6 +85,7 @@ class LiveOandaForexEnv:
 
         # If no position in that instrument is found
         print(f"No existing position found for {self.instrument} in OANDA.")
+        
 
     def _fetch_initial_data(self):
         """
@@ -169,26 +170,20 @@ class LiveOandaForexEnv:
             print(f"Error opening position: {e}")
 
     def live_close_position(self):
-        """
-        Close the current live position with error handling.
-        Calls close_position(...) from oanda_api.py
-        then logs a Trade object, resets environment state, etc.
-        """
         if not self.position_open:
             print("Live: No open position to close.")
             return
-
+    
         try:
-            response = close_position(account_id=ACCOUNT_ID, instrument=self.instrument)
+            response = close_position(account_id=ACCOUNT_ID, instrument=self.instrument, position_side=self.position_side)
             if response is not None:
-                exit_price = self.data[self.current_index][3]  # Adjust indexing to your data shape
+                exit_price = self.data[self.current_index][3]  # Adjust as needed
                 profit = 0.0
                 if self.position_side == "long":
                     profit = (exit_price - self.entry_price) / self.entry_price
                 elif self.position_side == "short":
                     profit = (self.entry_price - exit_price) / self.entry_price
-
-                # Log the trade
+    
                 trade = Trade(
                     side=self.position_side,
                     entry_price=self.entry_price,
@@ -198,8 +193,7 @@ class LiveOandaForexEnv:
                 )
                 self.trade_log.append(trade)
                 print(f"Live: Closed {self.position_side} position on {self.instrument} at {exit_price}, profit={profit:.4f}")
-
-                # Reset environment position
+    
                 self.position_open = False
                 self.position_side = None
                 self.entry_price = None
@@ -208,31 +202,33 @@ class LiveOandaForexEnv:
         except Exception as e:
             print(f"Error closing position: {e}")
 
+    
     def step(self, action):
-        """
-        Execute one step in the live trading environment.
-        """
-        # Execute trade action
-        if action == 0:  # long
+        # Sync with OANDA to update local state based on actual open positions
+        self._sync_oanda_position_state()
+    
+        # Execute trade action based on the new signal
+        if action == 0:  # long signal
+            # If no position or current position is not long, then...
             if not self.position_open or self.position_side != "long":
                 if self.position_open:
-                    self.live_close_position()
-                self.live_open_position("long")
-        elif action == 1:  # short
+                    self.live_close_position()  # Close opposite (or any) position
+                self.live_open_position("long")  # Open a long position
+    
+        elif action == 1:  # short signal
             if not self.position_open or self.position_side != "short":
                 if self.position_open:
-                    self.live_close_position()
-                self.live_open_position("short")
-        elif action == 2:  # neutral: close any open trade
+                    self.live_close_position()  # Close opposite (or any) position
+                self.live_open_position("short")  # Open a short position
+    
+        elif action == 2:  # neutral signal: close any open trade
             if self.position_open:
                 self.live_close_position()
-        
-        # Compute reward
+    
+        # Compute reward, update data, etc.
+        self._sync_oanda_position_state()
         reward = self.compute_reward(action)
-        
-        # Update live data
         self.update_live_data()
         next_state = self.features[self.current_index-16:self.current_index]
-        done = False  # In live trading, the loop continues indefinitely
+        done = False  # Live trading typically runs continuously
         return next_state, reward, done, {}
-    

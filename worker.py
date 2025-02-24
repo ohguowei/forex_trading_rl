@@ -119,7 +119,7 @@ def worker(
             local_model.load_state_dict(global_model.state_dict())
             
             # Log info
-            print(f"[Worker {worker_id}] Step: {step_count}, Loss: {loss.item():.4f}, Reward: {reward:.4f}")
+           # print(f"[Worker {worker_id}] Step: {step_count}, Loss: {loss.item():.4f}, Reward: {reward:.4f}")
             
             # Prepare next iteration
             if done or next_state is None:

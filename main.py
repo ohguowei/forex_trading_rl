@@ -134,8 +134,8 @@ def main():
     # Periodically aggregate models and do a trading step
     while True:
         #time.sleep(aggregation_interval)  # Let the workers run for a bit
-        wait_for_trading_window()  # Wait here until we’re within Mon 6 AM – Sat 6 AM
-        wait_until_next_trigger()
+     #   wait_for_trading_window()  # Wait here until we’re within Mon 6 AM – Sat 6 AM
+     #   wait_until_next_trigger()
         # Start multiple training workers (using simulated environment)
         workers = []
         for i in range(num_workers):

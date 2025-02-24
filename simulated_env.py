@@ -111,9 +111,9 @@ class SimulatedOandaForexEnv:
             self.position_side = side
             # Apply spread to the entry price
             self.entry_price = self._apply_spread(self.data[self.current_index][3], side)
-            print(f"Simulated: Opened {side} position on {self.instrument} at entry price {self.entry_price}.")
-        else:
-            print(f"Simulated: Position already open ({self.position_side}).")
+     #       print(f"Simulated: Opened {side} position on {self.instrument} at entry price {self.entry_price}.")
+        #else:            
+            #print(f"Simulated: Position already open ({self.position_side}).")
 
     def simulated_close_position(self):
         """
@@ -137,14 +137,14 @@ class SimulatedOandaForexEnv:
                 timestamp=time.time()
             )
             self.trade_log.append(trade)
-            print(f"Simulated: Closed {self.position_side} position on {self.instrument} at exit price {exit_price}, Profit: {profit:.4f}")
+        #    print(f"Simulated: Closed {self.position_side} position on {self.instrument} at exit price {exit_price}, Profit: {profit:.4f}")
 
             # Reset position state
             self.position_open = False
             self.position_side = None
             self.entry_price = None
-        else:
-            print("Simulated: No open position to close.")
+       # else:
+       #     print("Simulated: No open position to close.")
 
     def step(self, action):
         """

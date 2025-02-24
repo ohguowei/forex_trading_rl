@@ -79,18 +79,14 @@ def open_position(account_id, instrument, units, side):
         print(f"Order failed: {e}")
         return None
 
-
-def close_position(account_id, instrument):
-    """
-    Actually close any open position for 'instrument'.
-    This sends a PositionClose request to OANDA
-    to close all units (long or short).
-    """
+def close_position(account_id, instrument, position_side):
     try:
-        data = {
-            "longUnits": "ALL",
-            "shortUnits": "ALL"
-        }
+        if position_side == "long":
+            data = {"longUnits": "ALL"}
+        elif position_side == "short":
+            data = {"shortUnits": "ALL"}
+        else:
+            raise ValueError("position_side must be 'long' or 'short'")
         r = positions.PositionClose(accountID=account_id, instrument=instrument, data=data)
         response = client.request(r)
         print(f"Position closed for {instrument}: {response}")
