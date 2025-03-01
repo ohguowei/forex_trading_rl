@@ -15,6 +15,16 @@ from models import ActorCritic
 from worker import worker
 from live_env import LiveOandaForexEnv
 
+from live_env import LiveOandaForexEnv
+from config import TradingConfig
+
+# Create a live environment using the centralized config values.
+live_env = LiveOandaForexEnv(
+    instrument=TradingConfig.INSTRUMENT,
+    units=TradingConfig.LIVE_UNITS,
+    candle_count=TradingConfig.CANDLE_COUNT
+)
+
 def wait_for_trading_window():
     # Loop until local time is Mon ≥6 AM and Sat <6 AM
     while True:
@@ -105,7 +115,7 @@ def trade_live(global_model, live_env, num_steps=10):
     
     print("[Trading] Finished trading cycle.")
     print("Trade Log:", live_env.trade_log)
-
+    
 ##############################################
 # Main Function: Hybrid Training & Trading
 ##############################################
@@ -114,7 +124,7 @@ def main():
     num_workers = 10 # Number of training workers
     train_steps = 100  # Steps per worker per episode
     trade_steps = 1  # Trading steps (candles) to process
-    aggregation_interval = 60  # Aggregate models every 60 seconds
+    aggregation_interval = 10  # Aggregate models every 60 seconds
 
     # Create the global model and optimizer
     global_model = ActorCritic()
@@ -125,7 +135,7 @@ def main():
     # Create a live environment (or pass the real API credentials)
     live_env = LiveOandaForexEnv(
         instrument="EUR_USD", 
-        units=1000, 
+        units=2250, 
         candle_count=5000
     )
     # Wait here until we’re within Mon 6 AM – Sat 6 AM
@@ -134,8 +144,8 @@ def main():
     # Periodically aggregate models and do a trading step
     while True:
         #time.sleep(aggregation_interval)  # Let the workers run for a bit
-        wait_for_trading_window()  # Wait here until we’re within Mon 6 AM – Sat 6 AM
-        wait_until_next_trigger()
+        #wait_for_trading_window()  # Wait here until we’re within Mon 6 AM – Sat 6 AM
+        #wait_until_next_trigger()
         # Start multiple training workers (using simulated environment)
         workers = []
         for i in range(num_workers):

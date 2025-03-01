@@ -4,11 +4,11 @@ from oandapyV20 import API
 import oandapyV20.endpoints.instruments as instruments
 import oandapyV20.endpoints.orders as orders
 import oandapyV20.endpoints.positions as positions
+from config import OandaConfig
 
-# Set up your credentials and environment.
-ACCOUNT_ID = "101-001-26348919-001"
-ACCESS_TOKEN = "68ff286dfb6bc058031e66ddcdc72d64-138d97e64d2976820a19a4b179cdcf09"
-ENVIRONMENT = "practice"  # Use "live" for real trading
+ACCOUNT_ID = OandaConfig.ACCOUNT_ID
+ACCESS_TOKEN = OandaConfig.ACCESS_TOKEN
+ENVIRONMENT = OandaConfig.ENVIRONMENT
 
 # Create a shared API client.
 client = API(access_token=ACCESS_TOKEN, environment=ENVIRONMENT)

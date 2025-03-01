@@ -11,6 +11,9 @@ from oanda_api import (
     ACCESS_TOKEN
 )
 
+from config import TradingConfig  # Import the centralized trading config
+
+
 class Trade:
     """
     A class to represent a trade with structured information.
@@ -21,6 +24,7 @@ class Trade:
         self.exit_price = exit_price
         self.profit = profit
         self.timestamp = timestamp
+        self.just_closed_profit = None  # <--- NEW
 
     def __repr__(self):
         return (
@@ -30,11 +34,16 @@ class Trade:
         )
 
 class LiveOandaForexEnv:
-    def __init__(self, instrument="EUR_USD", units=100, granularity="H1", candle_count=5000):
+    def __init__(self, 
+                 instrument=TradingConfig.INSTRUMENT, 
+                 units=TradingConfig.LIVE_UNITS, 
+                 granularity=TradingConfig.GRANULARITY, 
+                 candle_count=TradingConfig.CANDLE_COUNT):
         self.instrument = instrument
         self.units = units
         self.granularity = granularity
         self.candle_count = candle_count
+
 
         # Example data fetching
         self.data = self._fetch_initial_data()
@@ -47,10 +56,10 @@ class LiveOandaForexEnv:
         self.position_side = None
         self.entry_price = None
         self.trade_log = []
+        self.just_closed_profit = None  # <--- NEW
 
         # Possibly call _sync_oanda_position_state() here if you want
         self._sync_oanda_position_state()
-
 
 
     def _sync_oanda_position_state(self):
@@ -101,16 +110,27 @@ class LiveOandaForexEnv:
             raise
 
     def reset(self):
-        """
-        Reset the environment to its initial state.
-        """
         self.current_index = 16
         self.position_open = False
         self.position_side = None
         self.entry_price = None
         self.trade_log = []
-        return self.features[self.current_index-16:self.current_index]
-            
+    
+        self.data = self._fetch_initial_data()
+        self.features = compute_features(self.data)  # shape (..., 12)
+    
+        # same as in step: slice out the last 16 timesteps
+        initial_features = self.features[self.current_index - 16 : self.current_index]
+    
+        # no open position -> P/L = 0
+        current_pl = 0.0
+        pl_column = np.full((initial_features.shape[0], 1), current_pl)
+        # horizontally stack to get (16, 13)
+        initial_state = np.hstack((initial_features, pl_column))
+    
+        return initial_state
+
+
     def update_live_data(self):
         """
         Fetches the most recent candle from OANDA and appends it to the data.
@@ -126,49 +146,42 @@ class LiveOandaForexEnv:
             # Append the new candle to the data
             self.data = np.vstack((self.data, new_candle))
             
-            # Recompute features for the new candle
-            new_features = compute_features(np.vstack((self.data[-2:],)))
+            # Recompute features for the new candle (including the 13th feature)
+            new_features = compute_features(np.vstack((self.data[-2:],)))  # Ensure this returns (1, 13)
             self.features = np.vstack((self.features, new_features))
             
             # Increment the current index
             self.current_index += 1
         except Exception as e:
             print(f"Error updating live data: {e}")
-            # Optionally, log the error or take corrective action
-
-    def compute_reward(self, action):
-        """
-        Compute the reward based on the action and the latest price change.
-        """
-        z_t = self.features[self.current_index-1, 0]  # Percentage change in close price
-        if action == 0:  # long
-            delta = 1
-        elif action == 1:  # short
-            delta = -1
-        else:  # neutral
-            delta = 0
-        return delta * z_t
 
     def live_open_position(self, side):
-        """
-        Open a live position with error handling.
-        """
         if self.position_open:
             print(f"Live: Position already open ({self.position_side}). Cannot open a new position.")
             return
-
+    
         try:
             response = open_position(instrument=self.instrument, account_id=ACCOUNT_ID, units=self.units, side=side)
             if response is not None:
                 self.position_open = True
                 self.position_side = side
-                self.entry_price = self.data[self.current_index][3]  # Use the current candle's close price
+                # Use the actual fill price from the API response if available
+                if "orderFillTransaction" in response:
+                    self.entry_price = float(response["orderFillTransaction"]["price"])
+                elif "longOrderFillTransaction" in response:
+                    self.entry_price = float(response["longOrderFillTransaction"]["price"])
+                elif "shortOrderFillTransaction" in response:
+                    self.entry_price = float(response["shortOrderFillTransaction"]["price"])
+                else:
+                    # Fallback: use local candle close price
+                    self.entry_price = self.data[self.current_index][3]
                 print(f"Live: Opened {side} position on {self.instrument} at {self.entry_price}.")
             else:
                 print("Live: Order failed.")
         except Exception as e:
             print(f"Error opening position: {e}")
-
+    
+    
     def live_close_position(self):
         if not self.position_open:
             print("Live: No open position to close.")
@@ -177,13 +190,23 @@ class LiveOandaForexEnv:
         try:
             response = close_position(account_id=ACCOUNT_ID, instrument=self.instrument, position_side=self.position_side)
             if response is not None:
-                exit_price = self.data[self.current_index][3]  # Adjust as needed
-                profit = 0.0
+                # Parse exit_price from 'orderFillTransaction'
+                if "orderFillTransaction" in response:
+                    exit_price = float(response["orderFillTransaction"]["price"])
+                elif "longOrderFillTransaction" in response:
+                    exit_price = float(response["longOrderFillTransaction"]["price"])
+                elif "shortOrderFillTransaction" in response:
+                    exit_price = float(response["shortOrderFillTransaction"]["price"])
+                else:
+                    exit_price = self.data[self.current_index][3]
+    
+                # Realized profit
                 if self.position_side == "long":
                     profit = (exit_price - self.entry_price) / self.entry_price
-                elif self.position_side == "short":
+                else:  # short
                     profit = (self.entry_price - exit_price) / self.entry_price
     
+                # Record the closed trade
                 trade = Trade(
                     side=self.position_side,
                     entry_price=self.entry_price,
@@ -193,7 +216,11 @@ class LiveOandaForexEnv:
                 )
                 self.trade_log.append(trade)
                 print(f"Live: Closed {self.position_side} position on {self.instrument} at {exit_price}, profit={profit:.4f}")
-    
+                
+                # <--- STORE the just-closed profit here so compute_reward() can return it.
+                self.just_closed_profit = profit
+
+                # Reset open-position flags
                 self.position_open = False
                 self.position_side = None
                 self.entry_price = None
@@ -202,33 +229,77 @@ class LiveOandaForexEnv:
         except Exception as e:
             print(f"Error closing position: {e}")
 
+    def compute_reward(self, action):
+        """
+        Compute reward based on actual P&L:
+          1) If we closed a trade this step, return that trade’s realized profit.
+          2) Else if we have an open position, return mark-to-market profit.
+          3) Otherwise return 0.
+        """
+        # 1) If a position was closed this step, immediately return that realized P&L.
+        if self.just_closed_profit is not None:
+            reward = self.just_closed_profit
+            self.just_closed_profit = None
+            return reward
+        
+        # 2) If a position is still open, compute mark-to-market.
+        if self.position_open:
+            current_price = self.data[self.current_index][3]
+            if self.position_side == "long":
+                return (current_price - self.entry_price) / self.entry_price
+            else:  # short
+                return (self.entry_price - current_price) / self.entry_price
+        
+        # 3) No open position and no just-closed position => zero reward
+        return 0.0
     
     def step(self, action):
         # Sync with OANDA to update local state based on actual open positions
         self._sync_oanda_position_state()
-    
+        
         # Execute trade action based on the new signal
         if action == 0:  # long signal
-            # If no position or current position is not long, then...
             if not self.position_open or self.position_side != "long":
                 if self.position_open:
-                    self.live_close_position()  # Close opposite (or any) position
-                self.live_open_position("long")  # Open a long position
-    
+                    self.live_close_position()
+                self.live_open_position("long")
+        
         elif action == 1:  # short signal
             if not self.position_open or self.position_side != "short":
                 if self.position_open:
-                    self.live_close_position()  # Close opposite (or any) position
-                self.live_open_position("short")  # Open a short position
-    
+                    self.live_close_position()
+                self.live_open_position("short")
+        
         elif action == 2:  # neutral signal: close any open trade
             if self.position_open:
                 self.live_close_position()
-    
-        # Compute reward, update data, etc.
-        self._sync_oanda_position_state()
+        
+        # Compute reward using the updated method
         reward = self.compute_reward(action)
+        
+        # Update live data (this updates self.data and self.features, and increments self.current_index)
         self.update_live_data()
-        next_state = self.features[self.current_index-16:self.current_index]
+        
+        # Prepare the next state: a sliding window of 16 rows of features (each originally 12 dimensions)
+        next_features = self.features[self.current_index-16:self.current_index]
+        
+        # Calculate the current P/L:
+        if self.position_open:
+            # Using the current candle's close as a proxy for current market price.
+            current_price = self.data[self.current_index][3]
+            if self.position_side == "long":
+                current_pl = (current_price - self.entry_price) / self.entry_price
+            elif self.position_side == "short":
+                current_pl = (self.entry_price - current_price) / self.entry_price
+        else:
+            # Use the last realized P/L if available, or 0 if no trades have occurred
+            current_pl = self.trade_log[-1].profit if self.trade_log else 0.0
+    
+        # Append the P/L as an extra feature column to each row in the sliding window
+        # This creates a column with shape (16, 1) filled with current_pl.
+        pl_column = np.full((next_features.shape[0], 1), current_pl)
+        # Concatenate horizontally to obtain an updated state with 13 features per timestep.
+        next_state = np.hstack((next_features, pl_column))
+        
         done = False  # Live trading typically runs continuously
         return next_state, reward, done, {}

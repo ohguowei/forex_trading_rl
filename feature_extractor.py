@@ -30,7 +30,7 @@ def compute_rsi(prices, period=14):
 
 def compute_features(data):
     """
-    Compute features for each time step from the OHLC data, including volume and RSI.
+    Compute features for each time step from the OHLC data, including volume, RSI, and P/L.
     
     For each time step i (starting at 1 since we need a previous candle):
       x1 = (c_i - c_{i-1}) / c_{i-1}      : Percentage change in close price
@@ -45,9 +45,10 @@ def compute_features(data):
       x10 = RSI_72                        : RSI with a 72-period window
       x11 = RSI_148                       : RSI with a 148-period window
       x12 = RSI_200                       : RSI with a 200-period window
+      x13 = P/L                           : Profit/Loss (new feature)
     
     Returns:
-      A NumPy array of shape (len(data)-1, 12) where each row contains [x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12].
+      A NumPy array of shape (len(data)-1, 13) where each row contains [x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13].
     """
     features = []
     close_prices = data[:, 3]  # Extract closing prices for RSI calculation
@@ -58,7 +59,6 @@ def compute_features(data):
     max_volume = np.max(volumes)
     volume_range = max_volume - min_volume
     if volume_range == 0:
-        # E.g., set normalized_volume to zeros (or 1.0, or any constant)
         normalized_volume = np.zeros_like(volumes)
     else:
         normalized_volume = (volumes - min_volume) / volume_range
@@ -92,6 +92,10 @@ def compute_features(data):
         x10 = rsi_72[i]
         x11 = rsi_148[i]
         x12 = rsi_200[i]
+        
+        # New feature: P/L (Profit/Loss)
+        # Example: P/L is calculated as the difference between the current close and the previous close
+        #x13 = (c - c_prev) / c_prev  # You can replace this with your actual P/L calculation
         
         features.append([x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12])
     

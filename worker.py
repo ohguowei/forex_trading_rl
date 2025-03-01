@@ -10,6 +10,18 @@ from threading import Lock
 from simulated_env import SimulatedOandaForexEnv
 from models import ActorCritic
 
+from simulated_env import SimulatedOandaForexEnv
+from config import TradingConfig
+
+env = SimulatedOandaForexEnv(
+    instrument=TradingConfig.INSTRUMENT,
+    units=TradingConfig.SIMULATED_UNITS,
+    granularity=TradingConfig.GRANULARITY,
+    candle_count=TradingConfig.CANDLE_COUNT,
+    spread=TradingConfig.SPREAD
+)
+
+
 def worker(
     worker_id: int,
     global_model: ActorCritic,
@@ -38,7 +50,7 @@ def worker(
     # Adjust parameters as needed for your setup
     env = SimulatedOandaForexEnv(
         instrument="EUR_USD",
-        units=100,
+        units=2500,
         granularity="H1",
         candle_count=5000,
         spread=0.0002
@@ -51,7 +63,7 @@ def worker(
     # Convert them to torch tensors (batch_size=1 assumed)
     state_t = torch.tensor(state, dtype=torch.float32).unsqueeze(0)   # (1, seq_len, features)
     decisions_t = torch.tensor(decisions, dtype=torch.float32)        # (1, decision_dim)
-
+    
     step_count = 0
     while step_count < max_steps:
         try:

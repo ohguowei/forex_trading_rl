@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class ActorCritic(nn.Module):
-    def __init__(self, input_size=12, decision_dim=16, hidden_size=128, num_actions=3):
+    def __init__(self, input_size=13, decision_dim=16, hidden_size=128, num_actions=3):  # Updated input_size to 13
         super(ActorCritic, self).__init__()
         # Actor branch
         self.actor_lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
@@ -20,7 +20,7 @@ class ActorCritic(nn.Module):
         self.critic_fc2 = nn.Linear(32 + decision_dim, 64)
         self.critic_fc3 = nn.Linear(64, 64)
         self.critic_output = nn.Linear(64, 1)
-
+        
     def forward(self, state, decisions):
         """
         Args:
