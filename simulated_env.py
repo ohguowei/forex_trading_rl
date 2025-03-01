@@ -19,44 +19,50 @@ class Trade:
         return f"Trade(side={self.side}, entry={self.entry_price}, exit={self.exit_price}, profit={self.profit:.4f})"
 
 class SimulatedOandaForexEnv:
-    def __init__(self, 
-                 instrument=TradingConfig.INSTRUMENT, 
-                 units=TradingConfig.SIMULATED_UNITS, 
-                 granularity=TradingConfig.GRANULARITY, 
-                 candle_count=TradingConfig.CANDLE_COUNT, 
-                 spread=TradingConfig.SPREAD):
-        self.instrument = instrument
-        self.units = units
+    def __init__(self, currency_config, candle_count=TradingConfig.CANDLE_COUNT, granularity=TradingConfig.GRANULARITY):
+        self.currency_config = currency_config
+        self.instrument = currency_config.instrument
+        self.units = currency_config.simulated_units
+        self.spread = currency_config.spread
+        
+        # NEW: store credentials from the currency configuration
+        self.account_id = currency_config.account_id
+        self.access_token = currency_config.access_token
+        self.environment = currency_config.environment
+        
         self.granularity = granularity
         self.candle_count = candle_count
-        self.spread = spread
 
         # Fetch initial historical data
         self.data = self._fetch_initial_data()
-        # Compute your base features (shape: (len(data) - 1, 12))
         self.features = compute_features(self.data)
-
-        # We start after the first 16 candles
         self.current_index = 16
 
-        # Trade state variables
         self.position_open = False
         self.position_side = None
         self.entry_price = None
         self.trade_log = []
+
 
     def _fetch_initial_data(self):
         """
         Fetch initial historical data from OANDA API with error handling.
         """
         try:
-            data = np.array(fetch_candle_data(self.instrument, self.granularity, self.candle_count))
+            data = np.array(fetch_candle_data(
+                self.instrument, 
+                self.granularity, 
+                self.candle_count, 
+                access_token=self.access_token, 
+                environment=self.environment
+            ))
             if len(data) == 0:
                 raise ValueError("No data returned from OANDA API.")
             return data
         except Exception as e:
             print(f"Error fetching initial data: {e}")
             raise
+
 
     def reset(self):
         """
@@ -88,20 +94,33 @@ class SimulatedOandaForexEnv:
     def update_live_data(self):
         """
         Fetch the most recent candle from OANDA and append it to the data.
+        Handles API errors gracefully.
         """
         try:
-            new_candle = fetch_candle_data(self.instrument, self.granularity, candle_count=1)[0]
-            # For your data shape, you might have [open, high, low, close, volume]
-            if len(new_candle) != 4 and len(new_candle) != 5:
+            new_candle = fetch_candle_data(
+                self.instrument, 
+                self.granularity, 
+                candle_count=1, 
+                access_token=self.access_token, 
+                environment=self.environment
+            )[0]
+            
+            # Ensure the candle has all required fields (expected: [open, high, low, close, volume])
+            if len(new_candle) != 5:
                 raise ValueError("Invalid candle data returned from OANDA API.")
-
+            
+            # Append the new candle to the existing data
             self.data = np.vstack((self.data, new_candle))
-            # Recompute features for just the new candle
+            
+            # Recompute features for the new candle (ensure the result shape is (1, 13) if expected)
             new_features = compute_features(np.vstack((self.data[-2:],)))
             self.features = np.vstack((self.features, new_features))
+            
+            # Increment the current index to reflect the new data point
             self.current_index += 1
         except Exception as e:
             print(f"Error updating live data: {e}")
+
 
     def compute_reward(self, action):
         """

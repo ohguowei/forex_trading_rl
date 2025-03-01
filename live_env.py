@@ -6,9 +6,7 @@ from oanda_api import (
     fetch_candle_data,
     open_position,
     close_position,
-    get_open_positions,
-    ACCOUNT_ID, 
-    ACCESS_TOKEN
+    get_open_positions
 )
 
 from config import TradingConfig  # Import the centralized trading config
@@ -34,20 +32,20 @@ class Trade:
         )
 
 class LiveOandaForexEnv:
-    def __init__(self, 
-                 instrument=TradingConfig.INSTRUMENT, 
-                 units=TradingConfig.LIVE_UNITS, 
-                 granularity=TradingConfig.GRANULARITY, 
-                 candle_count=TradingConfig.CANDLE_COUNT):
-        self.instrument = instrument
-        self.units = units
+    def __init__(self, currency_config, candle_count=TradingConfig.CANDLE_COUNT, granularity=TradingConfig.GRANULARITY):
+        self.account_id = currency_config.account_id
+        self.access_token = currency_config.access_token
+        self.environment = currency_config.environment
+        self.currency_config = currency_config
+        
+        self.instrument = currency_config.instrument
+        self.units = currency_config.live_units
+        self.account_id = currency_config.account_id  # Use this when calling API functions
         self.granularity = granularity
         self.candle_count = candle_count
 
-
-        # Example data fetching
+        # Fetch initial data and compute features
         self.data = self._fetch_initial_data()
-        # This is up to you to define
         self.features = compute_features(self.data)
         self.current_index = 16
 
@@ -56,29 +54,30 @@ class LiveOandaForexEnv:
         self.position_side = None
         self.entry_price = None
         self.trade_log = []
-        self.just_closed_profit = None  # <--- NEW
-
-        # Possibly call _sync_oanda_position_state() here if you want
+        self.just_closed_profit = None
         self._sync_oanda_position_state()
-
+        
+        print("Access token:", self.account_id)
+        print("Access token:", self.access_token)
+        print("Environment:", self.environment)
 
     def _sync_oanda_position_state(self):
         """
         Check OANDA for any open positions in our 'instrument'.
         If found, set self.position_open, self.position_side, and self.entry_price.
         """
-        positions_response = get_open_positions(ACCOUNT_ID)
+        positions_response = get_open_positions(self.account_id, self.access_token, self.environment)
         if not positions_response or "positions" not in positions_response:
             print("No positions found or error in position check.")
             return
-
+    
         # positions_response["positions"] is typically a list of dicts
         for pos in positions_response["positions"]:
             if pos["instrument"] == self.instrument:
                 # OANDA splits positions into 'long' and 'short' subfields
                 long_units = float(pos["long"]["units"])
                 short_units = float(pos["short"]["units"])
-
+    
                 if long_units > 0:
                     self.position_open = True
                     self.position_side = "long"
@@ -91,23 +90,30 @@ class LiveOandaForexEnv:
                     self.entry_price = float(pos["short"]["averagePrice"])
                     print(f"Detected existing SHORT position at price {self.entry_price}.")
                     return
-
+    
         # If no position in that instrument is found
         print(f"No existing position found for {self.instrument} in OANDA.")
-        
+
 
     def _fetch_initial_data(self):
         """
         Fetch initial historical data from OANDA API with error handling.
         """
         try:
-            data = np.array(fetch_candle_data(self.instrument, self.granularity, self.candle_count))
+            data = np.array(fetch_candle_data(
+                self.instrument, 
+                self.granularity, 
+                self.candle_count, 
+                access_token=self.access_token, 
+                environment=self.environment
+            ))
             if len(data) == 0:
                 raise ValueError("No data returned from OANDA API.")
             return data
         except Exception as e:
             print(f"Error fetching initial data: {e}")
             raise
+
 
     def reset(self):
         self.current_index = 16
@@ -136,8 +142,12 @@ class LiveOandaForexEnv:
         Fetches the most recent candle from OANDA and appends it to the data.
         Handles API errors gracefully.
         """
-        try:
-            new_candle = fetch_candle_data(self.instrument, self.granularity, candle_count=1)[0]
+        try:            
+            new_candle = fetch_candle_data(self.instrument, 
+                                           self.granularity, 
+                                           candle_count=1, 
+                                           access_token=self.access_token, 
+                                           environment=self.environment)[0]
             
             # Ensure the candle has all required fields
             if len(new_candle) != 5:  # [open, high, low, close, volume]
@@ -160,8 +170,13 @@ class LiveOandaForexEnv:
             print(f"Live: Position already open ({self.position_side}). Cannot open a new position.")
             return
     
-        try:
-            response = open_position(instrument=self.instrument, account_id=ACCOUNT_ID, units=self.units, side=side)
+        try:        
+            response = open_position(instrument=self.instrument,
+                                     account_id=self.account_id, 
+                                     units=self.units, side=side, 
+                                     access_token=self.access_token, 
+                                     environment=self.environment)
+
             if response is not None:
                 self.position_open = True
                 self.position_side = side
@@ -187,8 +202,13 @@ class LiveOandaForexEnv:
             print("Live: No open position to close.")
             return
     
-        try:
-            response = close_position(account_id=ACCOUNT_ID, instrument=self.instrument, position_side=self.position_side)
+        try:            
+            response = close_position(account_id=self.account_id, 
+                                      instrument=self.instrument, 
+                                      position_side=self.position_side, 
+                                      access_token=self.access_token, 
+                                      environment=self.environment)
+
             if response is not None:
                 # Parse exit_price from 'orderFillTransaction'
                 if "orderFillTransaction" in response:
