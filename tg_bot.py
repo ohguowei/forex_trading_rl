@@ -39,7 +39,7 @@ async def start_trading(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Trading resumed.")
 
 def run_telegram_bot():
-    token = "7860224739:AAEj0Nts7nnihLDP21mz0yuDfYz5psd7i7Y"  # Replace with your actual token.
+    token = ""  # Replace with your actual token.
     app = ApplicationBuilder().token(token).build()
 
     app.add_handler(CommandHandler("start", start))
