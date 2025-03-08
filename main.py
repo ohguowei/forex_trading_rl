@@ -11,47 +11,49 @@ from worker import worker
 from live_env import LiveOandaForexEnv
 from config import TradingConfig, CURRENCY_CONFIGS
 
+import tg_bot            # Contains Telegram bot logic and global "last_trade_status"
+
 # Directory to save models per currency.
 MODEL_DIR = "./models/"
 
 def wait_for_trading_window():
     """
-    Loop until the current local time is within the trading window:
+    Block until the current local time is within the trading window:
     Monday ≥6 AM to Saturday <6 AM.
     """
     while True:
         now = datetime.datetime.now()
         wd, hr = now.weekday(), now.hour
-        # Out-of-window conditions: Sunday (6), Monday before 6 AM (0), or Saturday at/after 6 AM (5)
+        # Trading allowed if NOT Sunday (weekday 6), NOT Monday before 6AM, NOT Saturday at/after 6AM.
         if not (wd == 6 or (wd == 0 and hr < 6) or (wd == 5 and hr >= 6)):
             return
-        print("Outside Mon 6AM – Sat 6AM window. Sleeping 60 seconds...")
+        print("Outside Mon 6AM – Sat 6AM trading window. Sleeping 60 seconds...")
         time.sleep(60)
 
 def calculate_next_trigger_time():
-    """
-    Calculate the next trigger time at the next hour and 1 minute mark.
-    """
     now = datetime.datetime.now()
-    next_hour = now.replace(minute=0, second=0, microsecond=0) + datetime.timedelta(hours=1)
-    return next_hour
+    next_minute = ((now.minute // 10) + 1) * 10
+    if next_minute >= 60:
+        next_trigger = now.replace(minute=0, second=0, microsecond=0) + datetime.timedelta(hours=1)
+    else:
+        next_trigger = now.replace(minute=next_minute, second=0, microsecond=0)
+    return next_trigger
 
 def wait_until_next_trigger():
-    """
-    Wait until the next trigger time (next hour and 1 minute mark).
-    """
-    next_trigger_time = calculate_next_trigger_time()
+    next_trigger = calculate_next_trigger_time()
     now = datetime.datetime.now()
-    time_to_wait = (next_trigger_time - now).total_seconds()
-    if time_to_wait > 0:
-        print(f"Waiting {time_to_wait:.0f} seconds until the next trigger at {next_trigger_time.strftime('%H:%M:%S')}...")
-        time.sleep(time_to_wait)
+    wait_time = (next_trigger - now).total_seconds()
+    if wait_time > 0:
+        print(f"Waiting {wait_time:.0f} seconds until next trigger at {next_trigger.strftime('%H:%M:%S')}...")
+        time.sleep(wait_time)
     else:
         print("Next trigger time is in the past. Triggering immediately.")
+    return next_trigger
 
 def trade_live(currency_model, live_env, num_steps=10):
     """
-    Run a live trading cycle using the given currency model and live environment.
+    Runs a live trading cycle.
+    Updates the Telegram bot's global last_trade_status variable with the most recent trade.
     """
     currency_model.eval()
     state = live_env.reset()
@@ -73,79 +75,94 @@ def trade_live(currency_model, live_env, num_steps=10):
             break
     print("[Trading] Finished trading cycle.")
     print("Trade Log:", live_env.trade_log)
-
-def main():
-    #sunday
-    num_workers = 20       # Number of workers per currency
-    train_steps = 5000     # Training steps for each worker
     
-    #weekday
-    #num_workers = 5       # Number of workers per currency
-    #train_steps = 1000     # Training steps for each worker
-    trade_steps = 1       # Number of live trading steps after training
-    os.makedirs(MODEL_DIR, exist_ok=True)
+    # Update the global trade status.
+    if live_env.trade_log:
+        last_trade = live_env.trade_log[-1]
+        tg_bot.last_trade_status = str(last_trade)
+        print("Updated last trade status:", tg_bot.last_trade_status)
+    else:
+        tg_bot.last_trade_status = "No trades executed."
 
+def trading_loop():
+    """
+    The main trading/training loop. It first waits for the trading window,
+    then waits until the next trigger (every 10 minutes), and then executes either
+    a training or trading cycle depending on the trigger minute.
+    
+    It also checks the trading control flag and blocks if trading is paused.
+    """
+    num_workers = 100      # Number of worker threads for training.
+    train_steps = 10       # Training steps per worker.
+    trade_steps = 1        # Number of live trading steps per trading cycle.
+
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    
+    # Initialize (or load) models for each currency.
+    models = {}
     for currency, currency_config in CURRENCY_CONFIGS.items():
-        print(f"\n=== Starting training cycle for {currency} ===")
-        
-        # Ensure we are in the trading window and wait until the next trigger.
-        #time.sleep(10)
-        #wait_for_trading_window()
-        #wait_until_next_trigger()
-        
-        # Determine the model file path for this currency.
         model_path = os.path.join(MODEL_DIR, f"{currency}.pt")
-        
-        # Load an existing model if available; otherwise, initialize a new one.
         currency_model = ActorCritic()
         if os.path.exists(model_path):
             currency_model.load_state_dict(torch.load(model_path))
             print(f"Loaded existing model for {currency}.")
         else:
             print(f"Initializing new model for {currency}.")
-        
-        # Share the model's memory if using threads.
         currency_model.share_memory()
-        optimizer = optim.Adam(currency_model.parameters(), lr=0.00004)
-        optimizer_lock = threading.Lock()
+        models[currency] = currency_model
+
+    while True:
+        # Block until trading is active (tg_bot.trading_event is set).
+        tg_bot.trading_event.wait()
         
-        # Create the live trading environment.
-        live_env = LiveOandaForexEnv(
-            currency_config,
-            candle_count=TradingConfig.CANDLE_COUNT,
-            granularity=TradingConfig.GRANULARITY
-        )
+        wait_for_trading_window()
+        next_trigger = wait_until_next_trigger()
         
-        # Create a barrier for all workers plus the main thread.
-        barrier = threading.Barrier(num_workers + 1)
+        # Decide whether to run a training cycle or a trading cycle.
+        if next_trigger.minute == 0:
+            print(f"\n=== Trigger at {next_trigger.strftime('%H:%M:%S')}: Running TRAINING cycle ===")
+            for currency, currency_config in CURRENCY_CONFIGS.items():
+                print(f"\n--- Training cycle for {currency} ---")
+                model = models[currency]
+                optimizer = optim.Adam(model.parameters(), lr=0.00004)
+                optimizer_lock = threading.Lock()
+                barrier = threading.Barrier(num_workers + 1)
+                
+                workers = []
+                for i in range(num_workers):
+                    t = threading.Thread(
+                        target=worker,
+                        args=(i, model, optimizer, optimizer_lock, train_steps, currency_config, barrier),
+                        daemon=True
+                    )
+                    workers.append(t)
+                    t.start()
+                
+                barrier.wait()
+                torch.save(model.state_dict(), os.path.join(MODEL_DIR, f"{currency}.pt"))
+                for t in workers:
+                    t.join()
+                print(f"--- Finished training cycle for {currency} ---")
+        else:
+            print(f"\n=== Trigger at {next_trigger.strftime('%H:%M:%S')}: Running TRADING cycle ===")
+            for currency, currency_config in CURRENCY_CONFIGS.items():
+                print(f"\n--- Trading cycle for {currency} ---")
+                model = models[currency]
+                model.eval()
+                live_env = LiveOandaForexEnv(
+                    currency_config,
+                    candle_count=TradingConfig.CANDLE_COUNT,
+                    granularity=TradingConfig.GRANULARITY
+                )
+                trade_live(model, live_env, num_steps=trade_steps)
+                print(f"--- Finished trading cycle for {currency} ---")
         
-        # Start worker threads dedicated to this currency.
-        workers = []
-        for i in range(num_workers):
-            t = threading.Thread(
-                target=worker,
-                args=(i, currency_model, optimizer, optimizer_lock, train_steps, currency_config, barrier),
-                daemon=True
-            )
-            workers.append(t)
-            t.start()
-        
-        # Main thread waits at the barrier until all workers have finished training.
-        barrier.wait()
-        
-        # Save the updated model for this currency.
-        torch.save(currency_model.state_dict(), model_path)
-        #print(f"Saved updated model for {currency} to {model_path}.")
-        
-        # Run a live trading cycle using the updated model.
-        trade_live(currency_model, live_env, num_steps=trade_steps)
-        
-        # Join the worker threads.
-        for t in workers:
-            t.join()
-        
-        print(f"=== Finished training cycle for {currency} ===\n")
-        
+        print("\nCycle complete. Waiting for the next trigger...\n")
 
 if __name__ == "__main__":
-    main()
+    # Start the trading loop in a background thread.
+    trading_thread = threading.Thread(target=trading_loop, daemon=True)
+    trading_thread.start()
+    
+    # Run the Telegram bot in the main thread (to allow proper signal handling).
+    tg_bot.run_telegram_bot()
